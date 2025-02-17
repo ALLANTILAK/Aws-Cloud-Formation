@@ -1,0 +1,421 @@
+Resources:
+  # VPC Creation
+  MyVPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3tier'
+
+  # Internet Gateway
+  MyInternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3tierInternetGateway'
+
+  # Attach Internet Gateway to VPC
+  MyVPCGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref MyInternetGateway
+
+  # Public Subnet (ap-south-1a)
+  MyPublicSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: '10.0.1.0/24'
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: 'ap-northeast-3b'  # Adjusted for availability zone ap-south-1a
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3PublicSubnet'
+
+  # Private Subnet (ap-south-1b)
+  MyPrivateSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: '10.0.2.0/24'
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: 'ap-northeast-3a'  # Adjusted for availability zone ap-south-1b
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3PrivateSubnet'
+
+  # Elastic IP for NAT Gateway
+  MyNatEIP:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: 'vpc'
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3NatEIP'
+
+  # NAT Gateway
+  MyNatGateway:
+    Type: 'AWS::EC2::NatGateway'
+    Properties:
+      AllocationId: !GetAtt MyNatEIP.AllocationId
+      SubnetId: !Ref MyPublicSubnet
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3NatGateway'
+
+  # Public Route Table
+  MyPublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3PublicRouteTable'
+
+  # Public Route to Internet Gateway
+  MyPublicRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref MyPublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref MyInternetGateway
+
+  # Associate Public Subnet with Public Route Table
+  MyPublicSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref MyPublicSubnet
+      RouteTableId: !Ref MyPublicRouteTable
+
+  # Private Route Table
+  MyPrivateRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3PrivateRouteTable'
+
+  # Private Route via NAT Gateway
+  MyPrivateRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref MyPrivateRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref MyNatGateway
+
+  # Associate Private Subnet with Private Route Table
+  MyPrivateSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref MyPrivateSubnet
+      RouteTableId: !Ref MyPrivateRouteTable
+
+  # Security Group for Public Subnet
+  PublicSubnetSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Allow SSH, HTTP, HTTPS traffic for Public Subnet'
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: 'tcp'
+          FromPort: 22  # SSH
+          ToPort: 22
+          CidrIp: '0.0.0.0/0'
+        - IpProtocol: 'tcp'
+          FromPort: 80  # HTTP
+          ToPort: 80
+          CidrIp: '0.0.0.0/0'
+        - IpProtocol: 'tcp'
+          FromPort: 443  # HTTPS
+          ToPort: 443
+          CidrIp: '0.0.0.0/0'
+        - IpProtocol: 'tcp'
+          FromPort: 27017  # MONGO
+          ToPort: 27017
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3PublicSubnetSecurityGroup'
+
+  # Security Group for Private Subnet
+  PrivateSubnetSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Allow SSH, HTTP, HTTPS traffic for Private Subnet'
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: 'tcp'
+          FromPort: 22  # SSH
+          ToPort: 22
+          SourceSecurityGroupId: !Ref PublicSubnetSecurityGroup
+        - IpProtocol: 'tcp'
+          FromPort: 80  # HTTP
+          ToPort: 80
+          SourceSecurityGroupId: !Ref PublicSubnetSecurityGroup
+        - IpProtocol: 'tcp'
+          FromPort: 443  # HTTPS
+          ToPort: 443
+          SourceSecurityGroupId: !Ref PublicSubnetSecurityGroup
+        - IpProtocol: 'tcp'
+          FromPort: 27017  # MONGO
+          ToPort: 27017
+          SourceSecurityGroupId: !Ref PublicSubnetSecurityGroup
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3PrivateSubnetSecurityGroup'
+
+    # EC2 instance in Public Subnet (with Public IP)
+  PublicInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: 't3.micro'
+      ImageId: 'ami-0b40dea19b4538863'  # Replace with your AMI ID
+      KeyName: 'Mern_backend_kp'  # Replace with your EC2 key pair name
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'  # Assign Public IP
+          DeviceIndex: 0
+          SubnetId: !Ref MyPublicSubnet  # Attach to Public Subnet
+          GroupSet:
+            - !Ref PublicSubnetSecurityGroup  # Security group for Public Subnet
+      BlockDeviceMappings:
+        - DeviceName: '/dev/xvda'  # Root volume
+          Ebs:
+            VolumeSize: 8  # Size in GiB
+            VolumeType: 'gp2'  # General Purpose SSD
+            Encrypted: true  # Enable encryption
+            KmsKeyId: !Ref PublicInstanceKMSKey  # Attach the PublicInstance KMS key for encryption
+      Tags:
+        - Key: 'Name'
+          Value: 'PublicInstance'
+
+  # EC2 instance in Private Subnet (no Public IP)
+  PrivateInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: 't3.micro'
+      ImageId: 'ami-0b40dea19b4538863'  # Replace with your AMI ID
+      KeyName: 'Mern_backend_kp'  # Replace with your EC2 key pair name
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'false'  # Do not assign Public IP
+          DeviceIndex: 0
+          SubnetId: !Ref MyPrivateSubnet  # Attach to Private Subnet
+          GroupSet:
+            - !Ref PrivateSubnetSecurityGroup  # Security group for Private Subnet
+      BlockDeviceMappings:
+        - DeviceName: '/dev/xvda'  # Root volume
+          Ebs:
+            VolumeSize: 8  # Size in GiB
+            VolumeType: 'gp2'  # General Purpose SSD
+            Encrypted: true  # Enable encryption
+            KmsKeyId: !Ref PrivateInstanceKMSKey  # Attach the PrivateInstance KMS key for encryption
+      Tags:
+        - Key: 'Name'
+          Value: 'PrivateInstance'
+
+  # KMS Key for Public Instance
+  PublicInstanceKMSKey:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: 'KMS Key for Public Instance encryption'
+      KeyUsage: 'ENCRYPT_DECRYPT'
+      Origin: 'AWS_KMS'
+      EnableKeyRotation: true
+      Tags:
+        - Key: 'Name'
+          Value: 'PublicInstance-KMS-Key'
+
+  # KMS Key for Private Instance
+  PrivateInstanceKMSKey:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: 'KMS Key for Private Instance encryption'
+      KeyUsage: 'ENCRYPT_DECRYPT'
+      Origin: 'AWS_KMS'
+      EnableKeyRotation: true
+      Tags:
+        - Key: 'Name'
+          Value: 'PrivateInstance-KMS-Key'
+
+  # ALB Target Group (HTTP)
+  MyALBTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: 'proj3tierTargetGroup'
+      Port: 80
+      Protocol: 'HTTP'
+      VpcId: !Ref MyVPC
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: 'HTTP'
+      HealthCheckPath: '/'
+      HealthCheckPort: '80'
+      TargetType: 'instance'  # Targets will be EC2 instances
+      Matcher:
+        HttpCode: '200'
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3tier-target-group'
+
+  # ALB (Application Load Balancer)
+  MyALB:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Name: 'proj3tierALB'
+      Subnets:
+        - Ref: MyPublicSubnet
+        - Ref: MyPrivateSubnet
+      SecurityGroups:
+        - Ref: PublicSubnetSecurityGroup  # Assuming the security group allows inbound HTTP
+      Scheme: 'internet-facing'  # The ALB will be accessible from the internet
+      LoadBalancerAttributes:
+        - Key: 'idle_timeout.timeout_seconds'
+          Value: '60'  # Adjust idle timeout to 60 seconds
+      Type: 'application'
+      IpAddressType: 'ipv4'
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3tier-alb'
+
+  # ALB Listener (HTTP)
+  MyALBListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: 'fixed-response'
+          FixedResponseConfig:
+            StatusCode: '200'
+            ContentType: 'text/plain'
+            MessageBody: 'ALB is working!'
+      LoadBalancerArn: !Ref MyALB
+      Port: 80
+      Protocol: 'HTTP'
+
+  MyLaunchTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
+    Properties:
+      LaunchTemplateName: 'proj3tier-launch-template'
+      LaunchTemplateData:
+        ImageId: 'ami-0b40dea19b4538863'  # Replace with your AMI ID
+        InstanceType: 't2.micro'
+        KeyName: 'Mern_backend_kp'  # Replace with your EC2 key pair name
+        NetworkInterfaces:
+          - AssociatePublicIpAddress: true  # Ensure public IP is associated
+            DeviceIndex: 0
+            SubnetId: !Ref MyPublicSubnet  # Attach to Public Subnet
+            Groups:
+              - !Ref PublicSubnetSecurityGroup  # Reference the security group correctly
+        BlockDeviceMappings:
+          - DeviceName: '/dev/xvda'
+            Ebs:
+              VolumeSize: 8  # Size in GiB
+              VolumeType: 'gp2'  # General Purpose SSD
+              Encrypted: true
+
+  MyAutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      AutoScalingGroupName: 'proj3tier-asg'
+      MinSize: '1'
+      MaxSize: '5'
+      DesiredCapacity: '2'
+      VPCZoneIdentifier:
+        - Ref: MyPublicSubnet
+        - Ref: MyPrivateSubnet
+      LaunchTemplate:
+        LaunchTemplateId: !Ref MyLaunchTemplate
+        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
+      TargetGroupARNs:
+        - Ref: MyALBTargetGroup
+      HealthCheckType: 'EC2'
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: 'Name'
+          Value: 'proj3tier-asg-instance'
+          PropagateAtLaunch: true
+
+
+  # Auto Scaling Policy for Scaling based on CPU utilization
+  MyAutoScalingPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AutoScalingGroupName: !Ref MyAutoScalingGroup
+      PolicyType: 'TargetTrackingScaling'
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: 'ASGAverageCPUUtilization'
+        TargetValue: 50.0
+      EstimatedInstanceWarmup: 300
+
+Outputs:
+  VPCId:
+    Description: 'VPC ID'
+    Value: !Ref MyVPC
+
+  PublicSubnetId:
+    Description: 'Public Subnet ID'
+    Value: !Ref MyPublicSubnet
+
+  PrivateSubnetId:
+    Description: 'Private Subnet ID'
+    Value: !Ref MyPrivateSubnet
+
+  InternetGatewayId:
+    Description: 'Internet Gateway ID'
+    Value: !Ref MyInternetGateway
+
+  NatGatewayId:
+    Description: 'NAT Gateway ID'
+    Value: !Ref MyNatGateway
+
+  VPCSecurityGroupId:
+    Description: 'Security Group ID for the VPC'
+    Value: !Ref PublicSubnetSecurityGroup
+
+  PublicSubnetSecurityGroupId:
+    Description: 'Security Group ID for the Public Subnet'
+    Value: !Ref PublicSubnetSecurityGroup
+
+  PrivateSubnetSecurityGroupId:
+    Description: 'Security Group ID for the Private Subnet'
+    Value: !Ref PrivateSubnetSecurityGroup
+
+  PublicInstanceId:
+    Description: 'Public EC2 Instance ID'
+    Value: !Ref PublicInstance
+
+  PublicInstancePublicIP:
+    Description: 'Public EC2 Instance Public IP'
+    Value: !GetAtt PublicInstance.PublicIp
+
+  PrivateInstanceId:
+    Description: 'Private EC2 Instance ID'
+    Value: !Ref PrivateInstance
+
+  PublicInstanceKmsKeyId:
+    Description: 'KMS Key ID used for Public Instance root volume encryption'
+    Value: !Ref PublicInstanceKMSKey
+
+  PublicInstanceKmsKeyArn:
+    Description: 'KMS Key ARN used for Public Instance root volume encryption'
+    Value: !GetAtt PublicInstanceKMSKey.Arn
+
+  PrivateInstanceKmsKeyId:
+    Description: 'KMS Key ID used for Private Instance root volume encryption'
+    Value: !Ref PrivateInstanceKMSKey
+
+  PrivateInstanceKmsKeyArn:
+    Description: 'KMS Key ARN used for Private Instance root volume encryption'
+    Value: !GetAtt PrivateInstanceKMSKey.Arn
+
+  ALBEndpoint:
+    Description: 'The DNS name of the ALB'
+    Value: !GetAtt MyALB.DNSName
+
+  ALBTargetGroupARN:
+    Description: 'The ARN of the ALB target group'
+    Value: !Ref MyALBTargetGroup

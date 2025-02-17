@@ -1,0 +1,258 @@
+Resources:
+  # VPC Creation
+  MyVPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: 'Name'
+          Value: 'FrontendVPC'
+
+  # Internet Gateway
+  MyInternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: 'FrontendVPC-InternetGateway'
+
+  # Attach Internet Gateway to VPC
+  MyVPCGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref MyInternetGateway
+
+  # Public Subnet 1
+  PublicSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: '10.0.1.0/24'
+      AvailabilityZone: 'ap-south-1a'  # Adjust as needed
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: 'Name'
+          Value: 'FrontendPublicSubnet1'
+
+  # Public Subnet 2
+  PublicSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: '10.0.2.0/24'
+      AvailabilityZone: 'ap-south-1b'  # Adjust as needed
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: 'Name'
+          Value: 'FrontendPublicSubnet2'
+
+  # Create a Route Table for Public Subnets
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: 'Name'
+          Value: 'FrontendPublicRouteTable'
+
+  # Create a Default Route for Public Subnets to the Internet Gateway
+  PublicRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref MyInternetGateway
+
+  # Associate Route Table with Public Subnet 1
+  PublicSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  # Associate Route Table with Public Subnet 2
+  PublicSubnet2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # Security Group for EC2 Instance
+  MySecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Allow HTTP, HTTPS, SSH, MongoDB traffic'
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: 'tcp'
+          FromPort: 22  # SSH
+          ToPort: 22
+          CidrIp: '0.0.0.0/0'
+        - IpProtocol: 'tcp'
+          FromPort: 80  # HTTP
+          ToPort: 80
+          CidrIp: '0.0.0.0/0'
+        - IpProtocol: 'tcp'
+          FromPort: 443  # HTTPS
+          ToPort: 443
+          CidrIp: '0.0.0.0/0'
+        - IpProtocol: 'tcp'
+          FromPort: 27017  # MongoDB
+          ToPort: 27017
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Key: 'Name'
+          Value: 'FrontendSecurityGroup'
+
+  # Elastic IP for Public EC2 Instance
+  MyElasticIP:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: 'vpc'
+
+  # Public EC2 Instance
+  FrontendInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: 't2.micro'
+      ImageId: 'ami-0dee22c13ea7a9a67'  # Replace with the desired AMI
+      KeyName: 'proj3tierkp'  # Replace with your EC2 key pair name
+      SecurityGroupIds:
+        - !Ref MySecurityGroup
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: 'Name'
+          Value: 'FrontendEC2Instance'
+
+  # Application Load Balancer (ALB)
+  MyALB:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Name: 'FrontendALB'
+      Subnets:
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
+      SecurityGroups:
+        - Ref: MySecurityGroup
+      Scheme: 'internet-facing'  # ALB is internet-facing
+      LoadBalancerAttributes:
+        - Key: 'idle_timeout.timeout_seconds'
+          Value: '60'
+      Type: 'application'
+      IpAddressType: 'ipv4'
+      Tags:
+        - Key: 'Name'
+          Value: 'FrontendALB'
+
+  # ALB Target Group
+  MyALBTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: 'FrontendTargetGroup'
+      Port: 80
+      Protocol: 'HTTP'
+      VpcId: !Ref MyVPC
+      TargetType: 'instance'  # Targets will be EC2 instances
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: '/'
+      HealthCheckPort: '80'
+      Matcher:
+        HttpCode: '200'
+      Tags:
+        - Key: 'Name'
+          Value: 'FrontendTargetGroup'
+
+  # ALB Listener
+  MyALBListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      LoadBalancerArn: !Ref MyALB
+      Port: 80
+      Protocol: 'HTTP'
+      DefaultActions:
+        - Type: 'fixed-response'
+          FixedResponseConfig:
+            StatusCode: '200'
+            ContentType: 'text/plain'
+            MessageBody: 'ALB is working!'
+
+  # Launch Template for Auto Scaling Group
+  MyLaunchTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
+    Properties:
+      LaunchTemplateName: 'FrontendLaunchTemplate'
+      LaunchTemplateData:
+        ImageId: 'ami-0dee22c13ea7a9a67'  # Replace with your AMI ID
+        InstanceType: 't2.micro'
+        KeyName: 'proj3tierkp'
+        SecurityGroupIds:
+          - !Ref MySecurityGroup
+        BlockDeviceMappings:
+          - DeviceName: '/dev/xvda'
+            Ebs:
+              VolumeSize: 8  # Root volume size (GiB)
+              VolumeType: 'gp2'
+              Encrypted: true
+
+  # Auto Scaling Group
+  MyAutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      AutoScalingGroupName: 'FrontendASG'
+      MinSize: '1'
+      MaxSize: '5'
+      DesiredCapacity: '2'
+      VPCZoneIdentifier:
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref MyLaunchTemplate
+        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
+      TargetGroupARNs:
+        - Ref: MyALBTargetGroup
+      HealthCheckType: 'EC2'
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: 'Name'
+          Value: 'FrontendASG-instance'
+          PropagateAtLaunch: true
+
+  # Auto Scaling Policy
+  MyAutoScalingPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AutoScalingGroupName: !Ref MyAutoScalingGroup
+      PolicyType: 'TargetTrackingScaling'
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: 'ASGAverageCPUUtilization'
+        TargetValue: 50.0
+      EstimatedInstanceWarmup: 300
+
+Outputs:
+  VPCId:
+    Description: 'VPC ID'
+    Value: !Ref MyVPC
+
+  PublicSubnet1Id:
+    Description: 'Public Subnet 1 ID'
+    Value: !Ref PublicSubnet1
+
+  PublicSubnet2Id:
+    Description: 'Public Subnet 2 ID'
+    Value: !Ref PublicSubnet2
+
+  FrontendInstancePublicIP:
+    Description: 'Public IP of the Frontend EC2 Instance'
+    Value: !GetAtt FrontendInstance.PublicIp
+
+  ALBEndpoint:
+    Description: 'The DNS name of the ALB'
+    Value: !GetAtt MyALB.DNSName
+
+  ASGName:
+    Description: 'Auto Scaling Group Name'
+    Value: !Ref MyAutoScalingGroup
