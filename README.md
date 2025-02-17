@@ -5,4 +5,4 @@ Here I Created A Vpc SetUp For My Full Stack Mern Application with necessary aws
 
 Same For My Backend But With NAt Gateway Internet Connection......
 
-Refer The Script More Understanding
+Refer The Script For More Understanding
